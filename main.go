@@ -30,7 +30,6 @@ var (
 	envBind      string
 	envClusterID uint64
 	envWorkerID  uint64
-	envBench     bool
 
 	hostname string
 
@@ -39,17 +38,6 @@ var (
 
 func init() {
 	hostname, _ = os.Hostname()
-}
-
-func envBoolVar(val *bool, key string, defaultVal bool) {
-	sVal := strings.ToUpper(os.Getenv(key))
-	if strings.HasPrefix(sVal, "T") || strings.HasPrefix(sVal, "Y") || strings.HasPrefix(sVal, "ON") || strings.HasPrefix(sVal, "1") {
-		*val = true
-	} else if strings.HasPrefix(sVal, "F") || strings.HasPrefix(sVal, "N") || strings.HasPrefix(sVal, "OFF") || strings.HasPrefix(sVal, "0") {
-		*val = false
-	} else {
-		*val = defaultVal
-	}
 }
 
 func envStringVar(val *string, key string, defaultVal string) {
@@ -89,7 +77,6 @@ func main() {
 	envStringVar(&envBind, "BIND", ":3000")
 	envUint64Var(&envClusterID, "CLUSTER_ID", 0)
 	envUint64Var(&envWorkerID, "WORKER_ID", 0)
-	envBoolVar(&envBench, "BENCH", false)
 
 	if envClusterID == 0 {
 		err = errors.New("CLUSTER_ID not set")
@@ -127,19 +114,6 @@ func main() {
 
 	if err = s.Start(envBind); err != nil {
 		return
-	}
-
-	if envBench {
-		started := time.Now()
-		for i := 0; i < 1000; i++ {
-			nreq := nrpc.NewRequest("snowflake", "batch")
-			nreq.Payload = BatchReq{Size: 10}
-			res := BatchResp{}
-			if _, err = nrpc.InvokeAddr(context.Background(), "127.0.0.1"+envBind, nreq, &res); err != nil {
-				return
-			}
-		}
-		log.Printf("bench for 1000 requests: %s", time.Now().Sub(started).String())
 	}
 
 	chSig := make(chan os.Signal, 1)

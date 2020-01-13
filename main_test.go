@@ -42,15 +42,19 @@ func TestServer(t *testing.T) {
 
 func TestExtractSequenceID(t *testing.T) {
 	id := extractSequenceID("test-1")
-	if id != 1 {
+	if id != 2 {
 		t.Fatal("1")
 	}
 	id = extractSequenceID("t-test-123")
-	if id != 123 {
+	if id != 124 {
 		t.Fatal("123")
+	}
+	id = extractSequenceID("t-test-0")
+	if id != 1 {
+		t.Fatal("0")
 	}
 	id = extractSequenceID("t-test-")
 	if id != 0 {
-		t.Fatal("0")
+		t.Fatal("false")
 	}
 }
