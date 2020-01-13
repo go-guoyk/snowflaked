@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"go.guoyk.net/nrpc"
 	"go.guoyk.net/snowflake"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -27,33 +27,92 @@ const (
 )
 
 var (
-	optBind      string
-	optClusterID uint64
-	optWorkerID  uint64
+	envBind      string
+	envClusterID uint64
+	envWorkerID  uint64
+	envBench     bool
+
+	hostname string
 
 	zeroTime = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 )
+
+func init() {
+	hostname, _ = os.Hostname()
+}
+
+func envBoolVar(val *bool, key string, defaultVal bool) {
+	sVal := strings.ToUpper(os.Getenv(key))
+	if strings.HasPrefix(sVal, "T") || strings.HasPrefix(sVal, "Y") || strings.HasPrefix(sVal, "ON") || strings.HasPrefix(sVal, "1") {
+		*val = true
+	} else if strings.HasPrefix(sVal, "F") || strings.HasPrefix(sVal, "N") || strings.HasPrefix(sVal, "OFF") || strings.HasPrefix(sVal, "0") {
+		*val = false
+	} else {
+		*val = defaultVal
+	}
+}
+
+func envStringVar(val *string, key string, defaultVal string) {
+	*val = os.Getenv(key)
+	if len(*val) == 0 {
+		*val = defaultVal
+	}
+}
+
+func envUint64Var(val *uint64, key string, defaultVal uint64) {
+	var err error
+	sVal := os.Getenv(key)
+	if *val, err = strconv.ParseUint(sVal, 10, 64); err != nil {
+		*val = defaultVal
+	}
+}
+
+func extractSequenceID(hostname string) (id uint64) {
+	var err error
+	splits := strings.Split(hostname, "-")
+	if len(splits) == 0 {
+		id = 0
+		return
+	}
+	if id, err = strconv.ParseUint(splits[len(splits)-1], 10, 64); err != nil {
+		id = 0
+		return
+	}
+	return
+}
 
 func main() {
 	var err error
 	defer exit(&err)
 
-	flag.StringVar(&optBind, "bind", ":3000", "bind address")
-	flag.Uint64Var(&optClusterID, "cluster-id", 0, "cluster id, 5 bits unsigned integer")
-	flag.Uint64Var(&optWorkerID, "worker-id", 0, "worker id, 5 bits unsigned integer")
-	flag.Parse()
+	envStringVar(&envBind, "BIND", ":3000")
+	envUint64Var(&envClusterID, "CLUSTER_ID", 0)
+	envUint64Var(&envWorkerID, "WORKER_ID", 0)
+	envBoolVar(&envBench, "BENCH", false)
 
-	if optClusterID&Uint5Mask != optClusterID {
+	if envClusterID == 0 {
+		err = errors.New("CLUSTER_ID not set")
+		return
+	}
+
+	if envWorkerID == 0 {
+		if envWorkerID = extractSequenceID(hostname); envWorkerID == 0 {
+			err = errors.New("WORKER_ID not set and hostname contains no sequence id")
+			return
+		}
+	}
+
+	if envClusterID&Uint5Mask != envClusterID {
 		err = errors.New("invalid cluster id")
 		return
 	}
 
-	if optWorkerID&Uint5Mask != optWorkerID {
+	if envWorkerID&Uint5Mask != envWorkerID {
 		err = errors.New("invalid work id")
 		return
 	}
 
-	instanceId := optClusterID<<5 + optWorkerID
+	instanceId := envClusterID<<5 + envWorkerID
 
 	sf := snowflake.New(zeroTime, instanceId)
 	defer sf.Stop()
@@ -61,8 +120,21 @@ func main() {
 	s := nrpc.NewServer(nrpc.ServerOptions{})
 	routes(s, sf)
 
-	if err = s.Start(optBind); err != nil {
+	if err = s.Start(envBind); err != nil {
 		return
+	}
+
+	if envBench {
+		started := time.Now()
+		for i := 0; i < 1000; i++ {
+			nreq := nrpc.NewRequest("snowflake", "batch")
+			nreq.Payload = BatchReq{Size: 10}
+			res := BatchResp{}
+			if _, err = nrpc.InvokeAddr(context.Background(), "127.0.0.1"+envBind, nreq, &res); err != nil {
+				return
+			}
+		}
+		log.Printf("bench for 1000 requests: %s", time.Now().Sub(started).String())
 	}
 
 	chSig := make(chan os.Signal, 1)

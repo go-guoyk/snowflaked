@@ -39,3 +39,18 @@ func TestServer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestExtractSequenceID(t *testing.T) {
+	id := extractSequenceID("test-1")
+	if id != 1 {
+		t.Fatal("1")
+	}
+	id = extractSequenceID("t-test-123")
+	if id != 123 {
+		t.Fatal("123")
+	}
+	id = extractSequenceID("t-test-")
+	if id != 0 {
+		t.Fatal("0")
+	}
+}

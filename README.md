@@ -2,11 +2,11 @@
 
 snowflake service in nrpc
 
-## Usage
+## Environment Variables
 
-```shell script
-./snowflaked -bind :3000 -cluster-id 1 -worker-id 1
-```
+* `BIND`, port bind, default to `:3000`
+* `CLUSTER_ID`, 5 bits unsigned integer, should not be `0`
+* `WORKER_ID`, 5 bits unsigned integer, should not be `0`, automatically load k8s stateful-set sequence id from hostname
 
 ## NRPC
 
