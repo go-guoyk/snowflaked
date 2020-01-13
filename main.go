@@ -112,6 +112,10 @@ func main() {
 		return
 	}
 
+	log.Printf("BIND: %s", envBind)
+	log.Printf("CLUSTER_ID: %d", envClusterID)
+	log.Printf("WORKER_ID: %d", envWorkerID)
+
 	instanceId := envClusterID<<5 + envWorkerID
 
 	sf := snowflake.New(zeroTime, instanceId)
