@@ -78,6 +78,7 @@ func extractSequenceID(hostname string) (id uint64) {
 		id = 0
 		return
 	}
+	id = id + 1
 	return
 }
 
