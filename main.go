@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -57,7 +58,8 @@ func main() {
 	sf := snowflake.New(zeroTime, instanceId)
 	defer sf.Stop()
 
-	s := newServer(sf)
+	s := nrpc.NewServer(nrpc.ServerOptions{})
+	routes(s, sf)
 
 	if err = s.Start(optBind); err != nil {
 		return
@@ -71,20 +73,38 @@ func main() {
 	s.Shutdown()
 }
 
-func newServer(sf snowflake.Snowflake) *nrpc.Server {
-	s := nrpc.NewServer(nrpc.ServerOptions{})
+func routes(s *nrpc.Server, sf snowflake.Snowflake) *nrpc.Server {
 	s.HandleFunc("snowflake", "create", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
-		var req CreateReq
+		nres.Payload = &CreateResp{ID: int64(sf.NewID())}
+		return
+	})
+	s.HandleFunc("snowflake", "create_s", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
+		nres.Payload = &CreateSResp{ID: strconv.FormatUint(sf.NewID(), 10)}
+		return
+	})
+	s.HandleFunc("snowflake", "batch", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
+		var req BatchReq
 		if err = nreq.Unmarshal(&req); err != nil {
 			return
 		}
-		res := CreateResp{IDs: make([]int64, 0, req.Size)}
+		res := BatchResp{IDs: make([]int64, 0, req.Size)}
 		for i := 0; i < req.Size; i++ {
 			res.IDs = append(res.IDs, int64(sf.NewID()))
 		}
 		nres.Payload = res
 		return
 	})
-
+	s.HandleFunc("snowflake", "batch_s", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
+		var req BatchReq
+		if err = nreq.Unmarshal(&req); err != nil {
+			return
+		}
+		res := BatchSResp{IDs: make([]string, 0, req.Size)}
+		for i := 0; i < req.Size; i++ {
+			res.IDs = append(res.IDs, strconv.FormatUint(sf.NewID(), 10))
+		}
+		nres.Payload = res
+		return
+	})
 	return s
 }

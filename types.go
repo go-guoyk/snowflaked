@@ -1,9 +1,21 @@
 package main
 
-type CreateReq struct {
+type CreateResp struct {
+	ID int64 `json:"id"`
+}
+
+type CreateSResp struct {
+	ID string `json:"id"`
+}
+
+type BatchReq struct {
 	Size int `json:"size"`
 }
 
-type CreateResp struct {
+type BatchResp struct {
 	IDs []int64 `json:"ids"`
+}
+
+type BatchSResp struct {
+	IDs []string `json:"ids"`
 }
