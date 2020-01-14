@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/labstack/echo-contrib/prometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"go.guoyk.net/env"
@@ -27,6 +28,8 @@ func exit(err *error) {
 
 const (
 	Uint5Mask = uint64(1<<5) - 1
+
+	HealthPath = "/healthz"
 )
 
 var (
@@ -117,7 +120,8 @@ func main() {
 	e.HideBanner = true
 	e.HidePort = true
 	e.Use(middleware.Recover())
-	routes(e, sf)
+	meter(e)
+	route(e, sf)
 
 	// wait start
 	chStart := make(chan error, 1)
@@ -145,8 +149,15 @@ func main() {
 	}
 }
 
-func routes(e *echo.Echo, sf snowflake.Snowflake) {
-	e.GET("/healthz", func(ctx echo.Context) error {
+func meter(e *echo.Echo) {
+	p := prometheus.NewPrometheus("echo", func(ctx echo.Context) bool {
+		return ctx.Path() == HealthPath
+	})
+	p.Use(e)
+}
+
+func route(e *echo.Echo, sf snowflake.Snowflake) {
+	e.GET(HealthPath, func(ctx echo.Context) error {
 		return ctx.String(http.StatusOK, "OK")
 	})
 	g := e.Group("/snowflake")

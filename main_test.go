@@ -20,7 +20,7 @@ func BenchmarkServer(b *testing.B) {
 	e.HidePort = true
 	e.Use(middleware.Recover())
 	e.Use(middleware.Recover())
-	routes(e, sf)
+	route(e, sf)
 
 	go e.Start(":17001")
 	defer e.Shutdown(context.Background())
@@ -44,7 +44,7 @@ func TestServer(t *testing.T) {
 	e.HideBanner = true
 	e.HidePort = true
 	e.Use(middleware.Recover())
-	routes(e, sf)
+	route(e, sf)
 
 	go e.Start(":17001")
 	defer e.Shutdown(context.Background())
