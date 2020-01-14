@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	"go.guoyk.net/nrpc"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"go.guoyk.net/env"
 	"go.guoyk.net/snowflake"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -27,9 +30,9 @@ const (
 )
 
 var (
-	envBind      string
-	envClusterID uint64
-	envWorkerID  uint64
+	optBind      string
+	optClusterID uint64
+	optWorkerID  uint64
 
 	hostname string
 
@@ -38,21 +41,6 @@ var (
 
 func init() {
 	hostname, _ = os.Hostname()
-}
-
-func envStringVar(val *string, key string, defaultVal string) {
-	*val = os.Getenv(key)
-	if len(*val) == 0 {
-		*val = defaultVal
-	}
-}
-
-func envUint64Var(val *uint64, key string, defaultVal uint64) {
-	var err error
-	sVal := os.Getenv(key)
-	if *val, err = strconv.ParseUint(sVal, 10, 64); err != nil {
-		*val = defaultVal
-	}
 }
 
 func extractSequenceID(hostname string) (id uint64) {
@@ -70,92 +58,161 @@ func extractSequenceID(hostname string) (id uint64) {
 	return
 }
 
-func main() {
-	var err error
-	defer exit(&err)
+func setup() (err error) {
+	if err = env.StringVar(&optBind, "BIND", ":3000"); err != nil {
+		return
+	}
+	if err = env.Uint64Var(&optClusterID, "CLUSTER_ID", 0); err != nil {
+		return
+	}
+	if err = env.Uint64Var(&optWorkerID, "WORKER_ID", 0); err != nil {
+		return
+	}
 
-	envStringVar(&envBind, "BIND", ":3000")
-	envUint64Var(&envClusterID, "CLUSTER_ID", 0)
-	envUint64Var(&envWorkerID, "WORKER_ID", 0)
-
-	if envClusterID == 0 {
+	if optClusterID == 0 {
 		err = errors.New("CLUSTER_ID not set")
 		return
 	}
 
-	if envWorkerID == 0 {
-		if envWorkerID = extractSequenceID(hostname); envWorkerID == 0 {
+	if optWorkerID == 0 {
+		if optWorkerID = extractSequenceID(hostname); optWorkerID == 0 {
 			err = errors.New("WORKER_ID not set and hostname contains no sequence id")
 			return
 		}
 	}
 
-	if envClusterID&Uint5Mask != envClusterID {
-		err = errors.New("invalid cluster id")
+	if optClusterID&Uint5Mask != optClusterID {
+		err = errors.New("invalid CLUSTER_ID")
 		return
 	}
 
-	if envWorkerID&Uint5Mask != envWorkerID {
-		err = errors.New("invalid work id")
+	if optWorkerID&Uint5Mask != optWorkerID {
+		err = errors.New("invalid WORKER_ID")
+		return
+	}
+	return
+}
+
+func main() {
+	var err error
+	defer exit(&err)
+
+	// setup
+	if err = setup(); err != nil {
 		return
 	}
 
-	log.Printf("BIND: %s", envBind)
-	log.Printf("CLUSTER_ID: %d", envClusterID)
-	log.Printf("WORKER_ID: %d", envWorkerID)
+	// calculate instance id
+	instanceId := optClusterID<<5 + optWorkerID
 
-	instanceId := envClusterID<<5 + envWorkerID
+	// log
+	log.Printf("starting, bind=%s, cluster_id=%d, worker_id=%d, instance_id=%d", optBind, optClusterID, optWorkerID, instanceId)
 
+	// create snowflake
 	sf := snowflake.New(zeroTime, instanceId)
 	defer sf.Stop()
 
-	s := nrpc.NewServer(nrpc.ServerOptions{})
-	routes(s, sf)
+	// create echo server
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Recover())
+	routes(e, sf)
 
-	if err = s.Start(envBind); err != nil {
-		return
-	}
+	// wait start
+	chStart := make(chan error, 1)
+	go func() {
+		chStart <- e.Start(optBind)
+	}()
 
+	// wait signal
 	chSig := make(chan os.Signal, 1)
 	signal.Notify(chSig, syscall.SIGTERM, syscall.SIGINT)
-	sig := <-chSig
-	log.Printf("caught signal: %s", sig.String())
 
-	s.Shutdown()
+	select {
+	case err = <-chStart:
+		if err != nil {
+			log.Printf("failed to start: %s", err.Error())
+			return
+		}
+	case sig := <-chSig:
+		log.Printf("caught signal: %s", sig.String())
+	}
+
+	// shutdown
+	if err = e.Shutdown(context.Background()); err != nil {
+		return
+	}
 }
 
-func routes(s *nrpc.Server, sf snowflake.Snowflake) *nrpc.Server {
-	s.HandleFunc("snowflake", "create", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
-		nres.Payload = &CreateResp{ID: int64(sf.NewID())}
-		return
+func routes(e *echo.Echo, sf snowflake.Snowflake) {
+	e.GET("/healthz", func(ctx echo.Context) error {
+		return ctx.String(http.StatusOK, "OK")
 	})
-	s.HandleFunc("snowflake", "create_s", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
-		nres.Payload = &CreateSResp{ID: strconv.FormatUint(sf.NewID(), 10)}
-		return
-	})
-	s.HandleFunc("snowflake", "batch", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
-		var req BatchReq
-		if err = nreq.Unmarshal(&req); err != nil {
+	g := e.Group("/snowflake")
+	g.GET("/next_id", func(ctx echo.Context) (err error) {
+		// control cache
+		ctx.Response().Header().Set("Cache-Control", "no-store")
+
+		// request
+		var q NextIDReq
+		if err = ctx.Bind(&q); err != nil {
 			return
 		}
-		res := BatchResp{IDs: make([]int64, 0, req.Size)}
-		for i := 0; i < req.Size; i++ {
-			res.IDs = append(res.IDs, int64(sf.NewID()))
+
+		// response
+		var id interface{}
+		switch q.Format {
+		case "str_oct":
+			id = strconv.FormatUint(sf.NewID(), 8)
+		case "str_dec":
+			id = strconv.FormatUint(sf.NewID(), 10)
+		case "str_hex":
+			id = strconv.FormatUint(sf.NewID(), 16)
+		default:
+			id = sf.NewID()
 		}
-		nres.Payload = res
-		return
+		return ctx.JSON(http.StatusOK, NextIDRes{ID: id})
 	})
-	s.HandleFunc("snowflake", "batch_s", func(ctx context.Context, nreq *nrpc.Request, nres *nrpc.Response) (err error) {
-		var req BatchReq
-		if err = nreq.Unmarshal(&req); err != nil {
+	g.GET("/next_ids", func(ctx echo.Context) (err error) {
+		// control cache
+		ctx.Response().Header().Set("Cache-Control", "no-store")
+
+		// request
+		var q NextIDsReq
+		if err = ctx.Bind(&q); err != nil {
 			return
 		}
-		res := BatchSResp{IDs: make([]string, 0, req.Size)}
-		for i := 0; i < req.Size; i++ {
-			res.IDs = append(res.IDs, strconv.FormatUint(sf.NewID(), 10))
+
+		// response
+		var ids interface{}
+		switch q.Format {
+		case "str_oct":
+			out := make([]string, 0, q.Size)
+			for i := 0; i < q.Size; i++ {
+				out = append(out, strconv.FormatUint(sf.NewID(), 8))
+			}
+			ids = out
+		case "str_dec":
+			out := make([]string, 0, q.Size)
+			for i := 0; i < q.Size; i++ {
+				out = append(out, strconv.FormatUint(sf.NewID(), 10))
+			}
+			ids = out
+		case "str_hex":
+			out := make([]string, 0, q.Size)
+			for i := 0; i < q.Size; i++ {
+				out = append(out, strconv.FormatUint(sf.NewID(), 16))
+			}
+			ids = out
+		default:
+			out := make([]uint64, 0, q.Size)
+			for i := 0; i < q.Size; i++ {
+				out = append(out, sf.NewID())
+			}
+			ids = out
 		}
-		nres.Payload = res
+		err = ctx.JSON(http.StatusOK, NextIDsRes{IDs: ids})
 		return
 	})
-	return s
 }

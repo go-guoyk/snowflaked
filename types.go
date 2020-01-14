@@ -1,21 +1,18 @@
 package main
 
-type CreateResp struct {
-	ID int64 `json:"id"`
+type NextIDReq struct {
+	Format string `query:"format"`
 }
 
-type CreateSResp struct {
-	ID string `json:"id"`
+type NextIDRes struct {
+	ID interface{} `json:"id"`
 }
 
-type BatchReq struct {
-	Size int `json:"size"`
+type NextIDsReq struct {
+	Format string `query:"format"`
+	Size   int    `query:"size"`
 }
 
-type BatchResp struct {
-	IDs []int64 `json:"ids"`
-}
-
-type BatchSResp struct {
-	IDs []string `json:"ids"`
+type NextIDsRes struct {
+	IDs interface{} `json:"ids"`
 }

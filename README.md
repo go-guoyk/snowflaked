@@ -8,40 +8,33 @@ snowflake service in nrpc
 * `CLUSTER_ID`, 5 bits unsigned integer, should not be `0`
 * `WORKER_ID`, 5 bits unsigned integer, should not be `0`, automatically load k8s stateful-set sequence id from hostname
 
-## NRPC
+## HTTP
 
-* `snowflake,create`
+* Single
 
-    **Response**
-
-    `{"id":4400868305313792}`
-   
-* `snowflake,create_s`
-
-    **Response**
-
-    `{"id":"4400868305313792"}`
+    ```
+    GET /snowflake/next_id
+  
+    QUERY
+    format = ("str_oct" | "str_dec" | "str_hex" | null)
+  
+    BODY
+    {"id":"1234567890"}
+    ```
     
-* `snowflake,batch`
+* Batch
 
-    **Request**
-    
-    `{"size":2}`
-    
-    **Response**
-
-    `{"id":[4400868305313792,4400868305313792]}`
-
-* `snowflake,batch_s`
-
-    **Request**
-    
-    `{"size":2}`
-    
-    **Response**
-
-    `{"id":["4400868305313792","4400868305313792"]}`
-
+    ```
+    GET /snowflake/next_ids
+  
+    QUERY
+    size = number of ids to return
+    format = ("str_oct" | "str_dec" | "str_hex" | null)
+  
+    BODY
+    {"ids":["1234567890"]}
+    ```
+     
 
 ## Credits
 

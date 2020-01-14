@@ -2,59 +2,59 @@ package main
 
 import (
 	"context"
-	"go.guoyk.net/nrpc"
+	"encoding/json"
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/stretchr/testify/require"
 	"go.guoyk.net/snowflake"
+	"net/http"
 	"testing"
 )
 
 func BenchmarkServer(b *testing.B) {
-	s := nrpc.NewServer(nrpc.ServerOptions{})
-	routes(s, snowflake.New(zeroTime, 0xaa))
-	s.Start(":12201")
-	defer s.Shutdown()
+	sf := snowflake.New(zeroTime, 0xaa)
+	defer sf.Stop()
+
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Recover())
+	e.Use(middleware.Recover())
+	routes(e, sf)
+
+	go e.Start(":17001")
+	defer e.Shutdown(context.Background())
 
 	for i := 0; i < b.N; i++ {
-		nreq := nrpc.NewRequest("snowflake", "batch_s")
-		nreq.Payload = BatchReq{Size: 10}
-		resp := BatchSResp{}
-		_, err := nrpc.InvokeAddr(context.Background(), "127.0.0.1:12201", nreq, &resp)
-		if err != nil {
-			b.Fatal(err)
-		}
+		hres, err := http.Get("http://127.0.0.1:17001/snowflake/next_ids?size=10&format=str_dec")
+		require.NoError(b, err)
+		res := NextIDsRes{}
+		dec := json.NewDecoder(hres.Body)
+		err = dec.Decode(&res)
+		require.NoError(b, err)
+		hres.Body.Close()
 	}
 }
 
 func TestServer(t *testing.T) {
-	s := nrpc.NewServer(nrpc.ServerOptions{})
-	routes(s, snowflake.New(zeroTime, 0xaa))
-	s.Start(":12202")
-	defer s.Shutdown()
+	sf := snowflake.New(zeroTime, 0xaa)
+	defer sf.Stop()
 
-	nreq := nrpc.NewRequest("snowflake", "create_s")
-	res := CreateSResp{}
-	nres, err := nrpc.InvokeAddr(context.Background(), "127.0.0.1:12202", nreq, &res)
-	t.Logf("%#v", nres)
-	t.Logf("%#v", res)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	e.Use(middleware.Recover())
+	routes(e, sf)
 
-func TestExtractSequenceID(t *testing.T) {
-	id := extractSequenceID("test-1")
-	if id != 2 {
-		t.Fatal("1")
-	}
-	id = extractSequenceID("t-test-123")
-	if id != 124 {
-		t.Fatal("123")
-	}
-	id = extractSequenceID("t-test-0")
-	if id != 1 {
-		t.Fatal("0")
-	}
-	id = extractSequenceID("t-test-")
-	if id != 0 {
-		t.Fatal("false")
-	}
+	go e.Start(":17001")
+	defer e.Shutdown(context.Background())
+
+	hres, err := http.Get("http://127.0.0.1:17001/snowflake/next_ids?size=10&format=str_hex")
+	require.NoError(t, err)
+	res := NextIDsRes{}
+	dec := json.NewDecoder(hres.Body)
+	err = dec.Decode(&res)
+	require.NoError(t, err)
+	hres.Body.Close()
+	t.Logf("Resp: %#v", res)
 }
