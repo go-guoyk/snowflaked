@@ -143,6 +143,9 @@ func main() {
 		log.Printf("caught signal: %s", sig.String())
 	}
 
+	// wait few seconds
+	time.Sleep(time.Second * 2)
+
 	// shutdown
 	if err = e.Shutdown(context.Background()); err != nil {
 		return
